@@ -12,10 +12,24 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"syscall"
 	"time"
-	//"unsafe"
+	"unsafe"
 )
+
+func setSpecialBaudRate(fd C.int, baudrate int) (err error) {
+	r1, _, e := syscall.Syscall(syscall.SYS_IOCTL,
+		uintptr(fd),
+		uintptr(0x80045402), //IOSSIOSPEED
+		uintptr(unsafe.Pointer(&baudrate)),
+	)
+	if e != 0 {
+		err = e
+	}
+
+	return err
+}
 
 func openPort(name string, baud int, databits byte, parity Parity, stopbits StopBits, readTimeout time.Duration) (p *Port, err error) {
 	f, err := os.OpenFile(name, syscall.O_RDWR|syscall.O_NOCTTY|syscall.O_NONBLOCK, 0666)
@@ -36,53 +50,66 @@ func openPort(name string, baud int, databits byte, parity Parity, stopbits Stop
 		return nil, err
 	}
 	var speed C.speed_t
-	switch baud {
-	case 115200:
-		speed = C.B115200
-	case 57600:
-		speed = C.B57600
-	case 38400:
-		speed = C.B38400
-	case 19200:
-		speed = C.B19200
-	case 9600:
-		speed = C.B9600
-	case 4800:
-		speed = C.B4800
-	case 2400:
-		speed = C.B2400
-	case 1200:
-		speed = C.B1200
-	case 600:
-		speed = C.B600
-	case 300:
-		speed = C.B300
-	case 200:
-		speed = C.B200
-	case 150:
-		speed = C.B150
-	case 134:
-		speed = C.B134
-	case 110:
-		speed = C.B110
-	case 75:
-		speed = C.B75
-	case 50:
-		speed = C.B50
-	default:
-		f.Close()
-		return nil, fmt.Errorf("Unknown baud rate %v", baud)
-	}
+	if baud <= 115200 {
+		switch baud {
+		case 115200:
+			speed = C.B115200
+		case 57600:
+			speed = C.B57600
+		case 38400:
+			speed = C.B38400
+		case 19200:
+			speed = C.B19200
+		case 9600:
+			speed = C.B9600
+		case 4800:
+			speed = C.B4800
+		case 2400:
+			speed = C.B2400
+		case 1200:
+			speed = C.B1200
+		case 600:
+			speed = C.B600
+		case 300:
+			speed = C.B300
+		case 200:
+			speed = C.B200
+		case 150:
+			speed = C.B150
+		case 134:
+			speed = C.B134
+		case 110:
+			speed = C.B110
+		case 75:
+			speed = C.B75
+		case 50:
+			speed = C.B50
+		default:
+			f.Close()
+			return nil, fmt.Errorf("Unknown baud rate %v", baud)
+		}
 
-	_, err = C.cfsetispeed(&st, speed)
-	if err != nil {
-		f.Close()
-		return nil, err
-	}
-	_, err = C.cfsetospeed(&st, speed)
-	if err != nil {
-		f.Close()
-		return nil, err
+		_, err = C.cfsetispeed(&st, speed)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		_, err = C.cfsetospeed(&st, speed)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+	} else if (baud > 115200 && baud <= 4000000) && (runtime.GOOS == "darwin") {
+		/*
+		 * The IOSSIOSPEED ioctl can be used to set
+		 * arbitrary baud rates other than those
+		 * implemented by POSIX. See https://developer.apple.com/library/archive/samplecode/SerialPortSample/Listings/SerialPortSample_SerialPortSample_c.html
+		 */
+		err = setSpecialBaudRate(fd, baud)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
 	}
 
 	// Turn off break interrupts, CR->NL, Parity checks, strip, and IXON
